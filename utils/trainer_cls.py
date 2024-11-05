@@ -751,8 +751,11 @@ def general_plot_for_epoch(
         ('loosely dashdotdotted', (0, (3, 10, 1, 10, 1, 10))),
         ('densely dashdotdotted', (0, (3, 1, 1, 1, 1, 1)))]
 
-    all_min = np.infty
-    all_max = -np.infty
+    try:
+        all_min = np.infty
+        all_max = -np.infty
+    except:
+        all_min, all_max = np.inf, -np.inf
     for idx, (label, value_list) in enumerate(labelToListDict.items()):
         linestyle = linestyle_tuple[
             idx % len(linestyle_tuple)
@@ -987,7 +990,7 @@ class ModelTrainerCLS_v2():
         self.scheduler = scheduler
         self.device = device
         self.amp = amp
-        self.scaler = torch.cuda.amp.GradScaler(enabled=self.amp)
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.amp)
         self.non_blocking = non_blocking
 
         self.frequency_save = frequency_save
@@ -1153,7 +1156,8 @@ class ModelTrainerCLS_v2():
 
         x, labels = x.to(device, non_blocking=self.non_blocking), labels.to(device, non_blocking=self.non_blocking)
 
-        with torch.cuda.amp.autocast(enabled=self.amp):
+        #with torch.cuda.amp.autocast(enabled=self.amp):
+        with torch.amp.autocast('cuda', enabled=self.amp):
             log_probs = self.model(x)
             loss = self.criterion(log_probs, labels.long())
         self.scaler.scale(loss).backward()
@@ -1663,6 +1667,7 @@ class PureCleanModelTrainer(ModelTrainerCLS_v2):
             test_asr_list.append(test_asr)
             test_ra_list.append(test_ra)
 
+            '''
             self.plot_loss(
                 train_loss_list,
                 clean_test_loss_list,
@@ -1675,10 +1680,24 @@ class PureCleanModelTrainer(ModelTrainerCLS_v2):
                 test_asr_list,
                 test_ra_list,
             )
+            '''
 
             self.agg_save_dataframe()
 
         self.agg_save_summary()
+
+        self.plot_loss(
+            train_loss_list,
+            clean_test_loss_list,
+            bd_test_loss_list,
+        )
+
+        self.plot_acc_like_metric(
+            train_mix_acc_list,
+            test_acc_list,
+            test_asr_list,
+            test_ra_list,
+        )
 
         return train_loss_list, \
                 train_mix_acc_list, \

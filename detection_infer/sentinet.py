@@ -113,6 +113,7 @@ class SentiNet:
         self.normalizer = self._get_normalize(args)
         self.denormalizer = self._get_denormalize(args)
         self.device = args.device
+        self.args = args
         self.input_height,self.input_width,self.input_channel = args.input_height,args.input_width,args.input_channel
 
     def _get_denormalize(self, args):
@@ -122,6 +123,8 @@ class SentiNet:
             denormalizer = Denormalize(args, [0.5], [0.5])
         elif args.dataset == "gtsrb":
             denormalizer = None
+        elif args.dataset == "tiny":
+            denormalizer = Denormalize(args, [0.4802, 0.4481, 0.3975], [0.2302, 0.2265, 0.2262])
         else:
             raise Exception("Invalid dataset")
         return denormalizer
@@ -133,6 +136,8 @@ class SentiNet:
             normalizer = Normalize(args, [0.5], [0.5])
         elif args.dataset == "gtsrb":
             normalizer = None
+        elif args.dataset == "tiny":
+            normalizer = Denormalize(args, [0.4802, 0.4481, 0.3975], [0.2302, 0.2265, 0.2262])
         else:
             raise Exception("Invalid dataset")
         if normalizer:
@@ -157,7 +162,7 @@ class SentiNet:
         assert len(output.shape) == 3
         return output
 
-    def _get_entropy(self, background, mask, dataset, classifier, target_label):
+    def _get_entropy_old(self, background, mask, dataset, classifier, target_label):
         index_overlay = np.arange(len(dataset))
         inert_pattern = np.random.rand(len(dataset),self.input_height,self.input_width,self.input_channel) * 255.0
         inert_pattern = np.clip(inert_pattern, 0, 255).astype(np.uint8)
@@ -175,6 +180,44 @@ class SentiNet:
         py2_add = F.softmax(py2_add, dim=1)
         _, yR = torch.max(py1_add, 1)
         conf_ip, _ = torch.max(py2_add, 1)
+        fooled_y = torch.sum(torch.where(yR==target_label,1.0,0.0))/len(dataset)
+        avg_conf_ip = torch.mean(conf_ip)
+        return fooled_y.detach().cpu().numpy(), avg_conf_ip.detach().cpu().numpy()
+    
+    def _get_entropy(self, background, mask, dataset, classifier, target_label):
+        index_overlay = np.arange(len(dataset))
+        inert_pattern = np.random.rand(len(dataset),self.input_height,self.input_width,self.input_channel) * 255.0
+        inert_pattern = np.clip(inert_pattern, 0, 255).astype(np.uint8)
+        x1_add, x2_add = [], []
+        yR, conf_ip = [], []
+        for index in range(len(dataset)):
+            add_image = self._superimpose(background, np.array(dataset[index_overlay[index]][0]), mask)
+            add_image = self.normalize(add_image)
+            x1_add.append( add_image )
+            ip_image = self._superimpose(background, inert_pattern[index], mask)
+            ip_image = self.normalize(ip_image)
+            x2_add.append( ip_image )
+            if len(x1_add)>=self.args.batch_size:
+                py1_add = classifier(torch.stack(x1_add).to(self.device))
+                py2_add = classifier(torch.stack(x2_add).to(self.device))
+                py2_add = F.softmax(py2_add, dim=1)
+                _, yR_ = torch.max(py1_add, 1)
+                conf_ip_, _ = torch.max(py2_add, 1)
+                yR.append(yR_)
+                conf_ip.append(conf_ip_)
+                x1_add, x2_add = [], []
+        if len(x1_add)>0:
+            py1_add = classifier(torch.stack(x1_add).to(self.device))
+            py2_add = classifier(torch.stack(x2_add).to(self.device))
+            py2_add = F.softmax(py2_add, dim=1)
+            _, yR_ = torch.max(py1_add, 1)
+            conf_ip_, _ = torch.max(py2_add, 1)
+            yR.append(yR_)
+            conf_ip.append(conf_ip_)
+            x1_add, x2_add = [], []
+
+        yR = torch.concatenate(yR)
+        conf_ip = torch.concatenate(conf_ip)
         fooled_y = torch.sum(torch.where(yR==target_label,1.0,0.0))/len(dataset)
         avg_conf_ip = torch.mean(conf_ip)
         return fooled_y.detach().cpu().numpy(), avg_conf_ip.detach().cpu().numpy()
@@ -320,56 +363,88 @@ class sentinet(defense):
         else:
             model.to(self.args.device)
             model.eval()
-        
+
+        #we do the filtering on the training data and not on bd_test data
         test_tran = get_transform(self.args.dataset, *([self.args.input_height,self.args.input_width]) , train = False)
-        bd_test_dataset = self.result['bd_test'].wrapped_dataset
-        pindex = np.where(np.array(bd_test_dataset.poison_indicator) == 1)[0]
+        bd_train_dataset = self.result['bd_train']
+        bd_train_dataset.wrap_img_transform = test_tran
+
+        pindex = np.where(np.array(bd_train_dataset.poison_indicator) == 1)[0]
 
         module_dict = dict(model.named_modules())
         target_layer = module_dict[args.target_layer]
         sentinet_detector = SentiNet(self.args)
-        cam = GradCAM(model=model, target_layers=[target_layer], use_cuda=args.device)
+        cam = GradCAM(model=model, target_layers=[target_layer])
         clean_test_dataset = self.result['clean_test'].wrapped_dataset
 
         ### b. find a clean sample from test dataset
-        images = []
-        labels = []
-        for img, label in clean_test_dataset:
-            images.append(img)
-            labels.append(label)
+        labels = [label for _, label, *other_info in clean_test_dataset]
         class_idx_whole = []
         num = int(self.args.clean_sample_num / self.args.num_classes)
         if num == 0:
             num = 1
         for i in range(self.args.num_classes):
             class_idx_whole.append(np.random.choice(np.where(np.array(labels)==i)[0], num))
-        image_c = []
-        label_c = []
         class_idx_whole = np.concatenate(class_idx_whole, axis=0)
-        image_c = [images[i] for i in class_idx_whole]
-        label_c = [labels[i] for i in class_idx_whole]
+        clean_dataset = [clean_test_dataset[i][:2] for i in class_idx_whole]
 
-        clean_dataset = [(image_c[i], label_c[i]) for i in range(len(image_c))]
-        ### c. load test dataset with poison samples
-        images_poison = []
-        labels_poison = []
-        for img, label,*other_info in bd_test_dataset:
-            images_poison.append(img)
-            labels_poison.append(label)
+        ### c. load training dataset with poison samples
+        #the training data already contains poison instances
 
         ### d. combine poisoned samples with clean samples
-        random_clean_index = np.random.choice(np.arange(len(images)), 1000, replace=False)
-        images_clean = [images[i] for i in random_clean_index]
-        labels_clean = [labels[i] for i in random_clean_index]
-        detected_samples = images_poison + images_clean
-        detected_labels = labels_poison + labels_clean
+        #random_clean_index = np.random.choice(np.arange(len(images)), 1000, replace=False)
+        #images_clean = [images[i] for i in random_clean_index]
+        #labels_clean = [labels[i] for i in random_clean_index]
+        #detected_samples = images_poison + images_clean
+        #detected_labels = labels_poison + labels_clean
 
-        test_dataset = xy_iter(detected_samples, detected_labels, transform=test_tran)
-        test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0, pin_memory=False)
+        #test_dataset = xy_iter(detected_samples, detected_labels, transform=test_tran)
+        test_dataset = bd_train_dataset
 
+        test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=0, pin_memory=False)
+
+        #------------------
+        logging.info(f'Scanning dataset ...')
+        target_category = None
+        suspect_index = []
+        n_data = 0
+        total_data = len(test_dataset)
+        last_perc = -1
+        img_index = 0
+        for input, label, *oth in test_dataloader:
+            input = input.to(self.args.device)
+            grayscale_cams = cam(input_tensor=input, targets=target_category)
+
+            masks = np.where(grayscale_cams >= args.mask_cond,1,0)
+            masks = np.expand_dims(masks,axis=-1)
+
+            preds = model(input)
+            _, sentinet_labels = torch.max(preds, 1)
+
+            for index in range(input.shape[0]):
+                background = np.array(test_dataset.wrapped_dataset[img_index][0])
+                mask = masks[index]
+                label = sentinet_labels[index]
+                fooled, avgconf = sentinet_detector(background, mask, clean_dataset, model, label)
+                if avgconf > 0.5:
+                    suspect_index.append(img_index)
+                img_index += 1
+            
+            n_data += input.shape[0]
+            l = int((100.0*n_data) / total_data)
+            if (l%10==0) and (l != last_perc):
+                last_perc = l
+                logging.info(f'Scanning dataset for poison: {l}% done')
+        
+        suspect_index = np.array(suspect_index)
+
+        #------------------
+
+
+        """ logging.info('Computing mask with gradcam ...')
         target_category = None
         grayscale_cams = []
-        for input, label in test_dataloader:
+        for input, label, *oth in test_dataloader:
             graycams = cam(input_tensor=input, targets=target_category)
             grayscale_cams.append(graycams)
         grayscale_cams = np.concatenate(grayscale_cams,axis=0)
@@ -377,7 +452,7 @@ class sentinet(defense):
         masks = np.where(grayscale_cams >= args.mask_cond,1,0)
         masks = np.expand_dims(masks,axis=-1)
         sentinet_labels = []
-        for input, label in test_dataloader:
+        for input, label, *oth in test_dataloader:
             input = input.to(self.args.device)
             preds = model(input)
             _, pred_labels = torch.max(preds, 1)
@@ -385,22 +460,35 @@ class sentinet(defense):
         sentinet_labels = np.concatenate(sentinet_labels,axis=0)
 
 
+        logging.info('Scanning dataset for poison ...')
         list_fooled = []
         list_avgconf = []
-        for index in range(len(detected_samples)):
-            background = np.array(detected_samples[index])
+        total_data = len(test_dataset)
+        n_data = 0
+        last_perc = -1
+        for index in range(len(test_dataset)):
+            background = np.array(test_dataset.wrapped_dataset[index][0])
             mask = masks[index]
             label = sentinet_labels[index]
             fooled, avgconf = sentinet_detector(background, mask, clean_dataset, model, label)
             list_fooled.append(fooled)
             list_avgconf.append(avgconf)
+            n_data += 1
+            l = int((100.0*n_data) / total_data)
+            if (l%10==0) and (l != last_perc):
+                last_perc = l
+                logging.info(f'Scanning dataset for poison: {l}% done')
 
-        suspect_index = np.where(np.array(list_avgconf)>0.9)[0]
 
-        true_index = np.zeros(len(detected_samples))
-        for i in range(len(true_index)):
-            if i < len(labels_poison):
-                true_index[i] = 1
+        suspect_index = np.where(np.array(list_avgconf)>0.9)[0] """
+
+
+
+        true_index = np.zeros(len(test_dataset))
+        true_index[pindex] = 1
+        #for i in range(len(true_index)):
+        #    if i < len(labels_poison):
+        #        true_index[i] = 1
 
         if len(suspect_index)==0:
             tn = len(true_index) - np.sum(true_index)
@@ -413,7 +501,7 @@ class sentinet(defense):
             csv_write.writerow([args.result_file, tn,fp,fn,tp, 0,0, 'None'])
             f.close()
         else:    
-            findex = np.zeros(len(detected_samples))
+            findex = np.zeros(len(true_index))
             for i in range(len(findex)):
                 if i in suspect_index:
                     findex[i] = 1
@@ -421,12 +509,14 @@ class sentinet(defense):
             tn, fp, fn, tp = self.cal(true_index, findex)
             TPR, FPR, precision, acc = self.metrix(tn, fp, fn, tp)
 
+            '''
             new_TP = tp
             new_FN = fn*9
             new_FP = fp*1
             precision = new_TP / (new_TP + new_FP) if new_TP + new_FP != 0 else 0
             recall = new_TP / (new_TP + new_FN) if new_TP + new_FN != 0 else 0
             fw1 = 2*(precision * recall)/ (precision + recall) if precision + recall != 0 else 0
+            '''
             end = time.perf_counter()
             time_miniute = (end-start)/60
 

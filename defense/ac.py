@@ -362,7 +362,7 @@ class ac(defense):
         optimizer, scheduler = argparser_opt_scheduler(model, self.args)
         # criterion = nn.CrossEntropyLoss()
         self.set_trainer(model)
-        criterion = argparser_criterion(args)
+        criterion = argparser_criterion(self.args)
 
         # test_tran = get_transform(self.args.dataset, *([self.args.input_height,self.args.input_width]) , train = False)
         # x = self.result['bd_test']['x']
@@ -395,29 +395,29 @@ class ac(defense):
         test_tran = get_transform(self.args.dataset, *([self.args.input_height,self.args.input_width]) , train = False)
         data_bd_testset = self.result['bd_test']
         data_bd_testset.wrap_img_transform = test_tran
-        data_bd_loader = torch.utils.data.DataLoader(data_bd_testset, batch_size=self.args.batch_size, num_workers=self.args.num_workers,drop_last=False, shuffle=True,pin_memory=args.pin_memory)
+        data_bd_loader = torch.utils.data.DataLoader(data_bd_testset, batch_size=self.args.batch_size, num_workers=self.args.num_workers,drop_last=False, shuffle=True,pin_memory=self.args.pin_memory)
 
         data_clean_testset = self.result['clean_test']
         data_clean_testset.wrap_img_transform = test_tran
-        data_clean_loader = torch.utils.data.DataLoader(data_clean_testset, batch_size=self.args.batch_size, num_workers=self.args.num_workers,drop_last=False, shuffle=True,pin_memory=args.pin_memory)
+        data_clean_loader = torch.utils.data.DataLoader(data_clean_testset, batch_size=self.args.batch_size, num_workers=self.args.num_workers,drop_last=False, shuffle=True,pin_memory=self.args.pin_memory)
 
 
         self.trainer.train_with_test_each_epoch_on_mix(
             data_loader_sie,
             data_clean_loader,
             data_bd_loader,
-            args.epochs,
+            self.args.epochs,
             criterion=criterion,
             optimizer=optimizer,
             scheduler=scheduler,
             device=self.args.device,
-            frequency_save=args.frequency_save,
-            save_folder_path=args.save_path,
+            frequency_save=self.args.frequency_save,
+            save_folder_path=self.args.save_path,
             save_prefix='ac',
-            amp=args.amp,
-            prefetch=args.prefetch,
+            amp=self.args.amp,
+            prefetch=self.args.prefetch,
             prefetch_transform_attr_name="ori_image_transform_in_loading", # since we use the preprocess_bd_dataset
-            non_blocking=args.non_blocking,
+            non_blocking=self.args.non_blocking,
         )
         
         # self.trainer.train_with_test_each_epoch(
@@ -440,10 +440,10 @@ class ac(defense):
         result['model'] = model
         result['dataset'] = data_set_o
         save_defense_result(
-            model_name=args.model,
-            num_classes=args.num_classes,
+            model_name=self.args.model,
+            num_classes=self.args.num_classes,
             model=model.cpu().state_dict(),
-            save_path=args.save_path,
+            save_path=self.args.save_path,
         )
         return result     
 
@@ -807,7 +807,8 @@ class ClusteringAnalyzer:
             report["Class_" + str(i)] = report_class
 
         report["suspicious_clusters"] = report["suspicious_clusters"] + np.sum(summary_poison_clusters).item()
-        return np.asarray(all_assigned_clean), summary_poison_clusters, report
+        #return np.asarray(all_assigned_clean), summary_poison_clusters, report
+        return all_assigned_clean, summary_poison_clusters, report
 
     def analyze_by_distance(
         self,
@@ -894,7 +895,7 @@ class ClusteringAnalyzer:
             assigned_clean = self.assign_class(clusters, clean_clusters, poison_clusters)
             all_assigned_clean.append(assigned_clean)
 
-        all_assigned_clean = np.asarray(all_assigned_clean)
+        #all_assigned_clean = np.asarray(all_assigned_clean)
         return all_assigned_clean, summary_poison_clusters, report
 
     def analyze_by_relative_size(
@@ -962,7 +963,8 @@ class ClusteringAnalyzer:
             report["Class_" + str(i)] = report_class
 
         report["suspicious_clusters"] = report["suspicious_clusters"] + np.sum(summary_poison_clusters).item()
-        return np.asarray(all_assigned_clean), summary_poison_clusters, report
+        #return np.asarray(all_assigned_clean), summary_poison_clusters, report
+        return all_assigned_clean, summary_poison_clusters, report
 
     def analyze_by_silhouette_score(
         self,
@@ -1061,7 +1063,8 @@ class ClusteringAnalyzer:
             all_assigned_clean.append(assigned_clean)
             report.update(report_class)
 
-        return np.asarray(all_assigned_clean), summary_poison_clusters, report
+        #return np.asarray(all_assigned_clean), summary_poison_clusters, report
+        return all_assigned_clean, summary_poison_clusters, report
 
 
 if __name__ == '__main__':

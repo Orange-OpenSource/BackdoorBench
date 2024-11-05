@@ -1,3 +1,80 @@
+# Variance Based Defense against BadNets and Blended Attacks (VBD)
+The VBD defense code is implemented within the <a href="https://github.com/SCLBD/BackdoorBench" target="_blank">BackdoorBench</a> framework.
+
+- **attack/maskblended.py**: Implementation of blended attacks with binary masks
+- **config/attack/maskblended/default.yaml**: Default configuration of the maskblended attack
+- **resource/maskblended/**: Contains the resource files such as the triggers and masks used in the experiments
+<br/>
+
+- **defense/VarianceBasedDefense.py**: Implementation of the poisoned instance detection method
+- **config/defense/vbd/**: Default configuration of the VBD defense
+- **vbd_utils**: Useful scripts to run the vbd experiments:
+  - **vbd_utils/slurm**: Utilities to run the experiments in a Slurm Cluster 
+
+<br/>
+
+### Running the experiments on a local machine
+
+First you need to install the prerequisites for the BackdoorBench framework. For this, we recommend to install pytorch 2.3.0 with cuda11.8 and cudnn8 and then the libraries for BackdoorBench with:
+```shell
+bash sh/install.sh
+```
+
+Then, you have to run the attacks (this will run sequentially and may take a while):
+```shell
+bash vbd_utils/run_all_attacks.sh
+```
+
+You can then run the detection methods (this will run sequentially and may take a while):
+```shell
+bash vbd_utils/run_all_defense.sh
+```
+
+And finally, you can use perf_reader.py to create a csv file with the detection performance:
+```shell
+python vbd_utils/perf_reader.py
+```
+This will create the "detect_summary.csv" and the "detect_summary_avg.csv" files.
+<br />
+
+### Running the experiments in a Slurm cluster with a Docker image
+First build the docker image with the following full image name **DOCKER_REPO_HOST[:PORT_NUMBER]/[NAMESPACE/]REPO/pytorch_2.3.0-cuda11.8:v1** (DOCKER_REPO_HOST[:PORT_NUMBER] is your docker repo host and [NAMESPACE/]REPO being the path where to store the docker image in the repo):
+```shell
+cd vbd_util/slurm
+docker login DOCKER_REPO_HOST[:PORT_NUMBER] -u my_username
+docker build -t DOCKER_REPO_HOST[:PORT_NUMBER]/[NAMESPACE/]REPO/pytorch_2.3.0-cuda11.8:v1 .
+docker push DOCKER_REPO_HOST[:PORT_NUMBER]/[NAMESPACE/]REPO/pytorch_2.3.0-cuda11.8:v1
+cd ../..
+```
+Create a **vbd_util/slurm/srun_args.local** file with the docker image options and slurm extra options: 
+```
+--container-image=DOCKER_REPO_HOST[:PORT_NUMBER]/[NAMESPACE/]REPO/pytorch_2.3.0-cuda11.8:v1
+--container-name=vbd_pytorch_2.3.0-cuda11.8_v1
+```
+<br/>
+You can now run the attacks:
+```shell
+vbd_util/slurm/sbatch_run_attack.sh
+```
+
+After that, you can run the defenses:
+```shell
+vbd_util/slurm/sbatch_run_defense.sh
+```
+
+
+Once the all the defense processes have finished, you can use perf_reader.py to create a csv file with the detection performance:
+```shell
+python vbd_utils/perf_reader.py
+```
+This will create the "detect_summary.csv" file.
+
+
+<br/><br/>
+Below you will find the original README file of the BackdoorBench framework
+
+---
+<br/><br/>
 <img src="resource/pyg_logo.png" style="height: 60px;" align="right">
 
 # BackdoorBench: a comprehensive benchmark of backdoor attack and defense methods

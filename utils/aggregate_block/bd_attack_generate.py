@@ -1,6 +1,11 @@
 # idea : the backdoor img and label transformation are aggregated here, which make selection with args easier.
 
-import sys, logging
+
+
+# Modifications: Add the MaskBlended attack and multitarget attack support
+
+
+import sys, logging, os
 sys.path.append('../../')
 import imageio
 from PIL import Image
@@ -8,7 +13,7 @@ import numpy as np
 import torchvision.transforms as transforms
 
 from utils.bd_img_transform.lc import labelConsistentAttack
-from utils.bd_img_transform.blended import blendedImageAttack
+from utils.bd_img_transform.blended import blendedImageAttack, MultiTargetBlendedAttack
 from utils.bd_img_transform.patch import AddMaskPatchTrigger, SimpleAdditiveTrigger
 from utils.bd_img_transform.sig import sigTriggerAttack
 from utils.bd_img_transform.SSBA import SSBA_attack_replace_version
@@ -78,7 +83,7 @@ def bd_attack_img_trans_generate(args):
             (Image.fromarray,False),
         ])
 
-    elif args.attack == 'blended':
+    elif args.attack in ['blended', 'maskblended']:
 
         trans = transforms.Compose([
             transforms.ToPILImage(),
@@ -86,14 +91,54 @@ def bd_attack_img_trans_generate(args):
             transforms.ToTensor()
         ])
 
+        target_mask = None
+        if (args.attack=='maskblended') and (len(args.attack_trigger_mask_path) > 0):
+            target_mask = trans(
+                        imageio.imread(args.attack_trigger_mask_path)  # '../data/hello_kitty_mask.jpeg'
+                    ).cpu().numpy().transpose(1, 2, 0) * 255
+            target_mask = ((target_mask[:,:,0] + target_mask[:,:,1] + target_mask[:,:,2]) != 0) * 1
+            target_mask = np.stack([target_mask, target_mask, target_mask], axis=-1)
+
+        if (args.attack=='maskblended') and args.attack_label_trans == 'multitarget':
+            assert(os.path.isdir(args.attack_trigger_img_path))
+            #pattern files are like: originalClass_targetClass.png and originalClass_targetClass_mask.png (e.g. 0_1.png and 0_1.mask.png)
+            t = [i for i in os.listdir(args.attack_trigger_img_path) if i.endswith('.png') and not i.endswith('_mask.png')]
+            pat_dict={}
+            mask_dict={}
+            for fn in t:
+                img = trans(imageio.imread(args.attack_trigger_img_path+'/'+ fn)).cpu().numpy().transpose(1, 2, 0) * 255
+                orig_label = int(fn.split('.')[0].split('_')[0])
+                pat_dict[orig_label] = img
+                l = fn.split('.')[0]+'_mask.png'
+                mask = trans(imageio.imread(args.attack_trigger_img_path+'/'+ l)).cpu().numpy().transpose(1, 2, 0) * 255
+                mask = ((mask[:,:,0] + mask[:,:,1] + mask[:,:,2]) != 0) * 1
+                mask = np.stack([mask, mask, mask], axis=-1)
+                mask_dict[orig_label] = mask
+
+            blend_trans_train = MultiTargetBlendedAttack(
+                pat_dict, mask_dict,
+                float(args.attack_train_blended_alpha)
+            )
+            blend_trans_test = MultiTargetBlendedAttack(
+                pat_dict, mask_dict,
+                float(args.attack_test_blended_alpha)
+            )
+        else:
+            blend_trans_train = blendedImageAttack(
+                trans(
+                    imageio.imread(args.attack_trigger_img_path) # '../data/hello_kitty.jpeg'
+                    ).cpu().numpy().transpose(1, 2, 0) * 255,
+                    float(args.attack_train_blended_alpha), target_mask) # 0.1,
+            blend_trans_test = blendedImageAttack(
+                trans(
+                    imageio.imread(args.attack_trigger_img_path) # '../data/hello_kitty.jpeg'
+                    ).cpu().numpy().transpose(1, 2, 0) * 255,
+                    float(args.attack_test_blended_alpha), target_mask) # 0.1,
+        
         train_bd_transform = general_compose([
             (transforms.Resize(args.img_size[:2]), False),
             (np.array, False),
-            (blendedImageAttack(
-            trans(
-                imageio.imread(args.attack_trigger_img_path) # '../data/hello_kitty.jpeg'
-                  ).cpu().numpy().transpose(1, 2, 0) * 255,
-            float(args.attack_train_blended_alpha)), True), # 0.1,
+            (blend_trans_train, True),
             (npClipAndToUint8,False),
             (Image.fromarray, False),
         ])
@@ -101,11 +146,7 @@ def bd_attack_img_trans_generate(args):
         test_bd_transform = general_compose([
             (transforms.Resize(args.img_size[:2]), False),
             (np.array, False),
-            (blendedImageAttack(
-            trans(
-                imageio.imread(args.attack_trigger_img_path) # '../data/hello_kitty.jpeg'
-                  ).cpu().numpy().transpose(1, 2, 0) * 255,
-            float(args.attack_test_blended_alpha)), True), # 0.1,
+            (blend_trans_test, True),
             (npClipAndToUint8,False),
             (Image.fromarray, False),
         ])
@@ -245,6 +286,14 @@ def bd_attack_label_trans_generate(args):
     elif args.attack_label_trans == 'all2all':
         bd_label_transform = AllToAll_shiftLabelAttack(
             int(1 if "attack_label_shift_amount" not in args.__dict__ else args.attack_label_shift_amount), int(args.num_classes)
+        )
+    elif args.attack_label_trans == 'multitarget':
+        assert(os.path.isdir(args.attack_trigger_img_path))
+        #pattern files are like: originalClass_targetClass.png and originalClass_targetClass_mask.png (e.g. 0_1.png and 0_1.mask.png)
+        t = [i.split('.')[0].split('_') for i in os.listdir(args.attack_trigger_img_path) if i.endswith('.png') and not i.endswith('_mask.png')]
+        label_map = {int(i[0]):int(i[1]) for i in t}
+        bd_label_transform = MultiTarget_MapLabelAttack(
+            label_map
         )
 
     return bd_label_transform

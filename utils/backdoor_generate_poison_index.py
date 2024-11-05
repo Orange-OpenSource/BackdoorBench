@@ -2,6 +2,9 @@
 #   generate_single_target_attack_train_poison_index is for all-to-one attack label transform
 #   generate_poison_index_from_label_transform aggregate both all-to-one and all-to-all case.
 
+
+# Modifications: Add the multitarget attack support
+
 import sys, logging
 sys.path.append('../')
 import random
@@ -122,6 +125,29 @@ def generate_poison_index_from_label_transform(
         poison_index[select_position] = 1
 
         return poison_index
+    elif isinstance(label_transform, MultiTarget_MapLabelAttack):
+        if train:
+            pass
+        else:
+            p_num = None
+            pratio = 1
+        
+        np_original_labels = np.array(original_labels)
+        ind_set = np.concatenate([np.where(np_original_labels==t)[0] for t in label_transform.label_map.keys()])
+
+        if p_num is not None:
+            select_position = np.random.choice(ind_set, size = p_num, replace=False)
+        elif pratio is not None:
+            select_position = np.random.choice(ind_set, size=round(len(ind_set) * pratio), replace=False)
+        else:
+            raise SystemExit('p_num or pratio must be given')
+        logging.info(f'poison num:{len(select_position)},real pratio {len(select_position) / len(ind_set)}, real pratio from whole:{len(select_position) / len(original_labels)}')
+
+        poison_index = np.zeros(len(original_labels))
+        poison_index[select_position] = 1
+
+        return poison_index
+        
     else:
         logging.debug('Not valid label_transform')
 

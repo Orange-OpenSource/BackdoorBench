@@ -1,5 +1,7 @@
 # This script include all-to-one and all-to-all attack
 
+# Modifications: Add the multitarget attack support
+
 import sys, logging
 sys.path.append('../')
 import random
@@ -39,3 +41,17 @@ class AllToAll_shiftLabelAttack(object):
     def poison_label(self, original_label):
         label_after_shift = (original_label + self.shift_amount)% self.num_classses
         return label_after_shift
+
+
+class MultiTarget_MapLabelAttack(object):
+    @classmethod
+    def add_argument(self, parser):
+        parser.add_argument('--attack_trigger_img_path', type=str,
+                            help='path to the trigger directory')
+    def __init__(self, label_map):
+        self.label_map = label_map
+    def __call__(self, original_label, original_index = None, img = None):
+        return self.poison_label(original_label)
+    def poison_label(self, original_label):
+        attack_target_label = self.label_map[original_label]
+        return attack_target_label
