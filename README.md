@@ -1,3 +1,19 @@
+
+This repository is a fork of the BackdoorBench framework (originally from <a href="https://github.com/SCLBD/BackdoorBench/" target="_blank">SCLBD/BackdoorBench</a>). It includes the following research module developed by Orange Research:
+
+- **Variance-Based Defense Against Blended Backdoor Attacks (VBD)**
+  - Development branch: [vbd_main](https://github.com/Orange-OpenSource/BackdoorBench/tree/vbd_main)
+  - Paper code: [vbd-v1](https://github.com/Orange-OpenSource/BackdoorBench/tree/vbd-v1)
+  - ECML/PKDD 2025 paper: tbd
+  - arXiv paper: tbd
+
+
+<br/><br/>
+Below you will find the original README file of the BackdoorBench framework
+
+---
+<br/><br/>
+
 <img src="resource/pyg_logo.png" style="height: 60px;" align="right">
 
 # BackdoorBench: a comprehensive benchmark of backdoor attack and defense methods
