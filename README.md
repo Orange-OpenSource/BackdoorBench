@@ -5,7 +5,7 @@ This repository is a fork of the BackdoorBench framework (originally from <a hre
   - Development branch: [vbd_main](https://github.com/Orange-OpenSource/BackdoorBench/tree/vbd_main)
   - Paper code: [vbd-v1](https://github.com/Orange-OpenSource/BackdoorBench/tree/vbd-v1)
   - ECML/PKDD 2025 paper: tbd
-  - arXiv paper: tbd
+  - arXiv paper: [Preprint](https://arxiv.org/pdf/2506.01444)
 
 
 <br/><br/>
